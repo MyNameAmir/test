@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>FIFA World Cup 2026 — Interactive 3D Globe</title>
+  <style>
+    :root {
+      --copper: #cd7f32;
+      --usa-blue: #2a4d9c;
+      --can-red: #d52b1e;
+      --mex-red: #c8102e;
+      --grey: #7d7d7d;
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body {
+      margin: 0;
+      height: 100%;
+      overflow: hidden;
+      background: #000010;
+      font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      color: #f2f2f2;
+    }
+
+    #globeViz { width: 100vw; height: 100vh; }
+
+    /* ---------- Title / header ---------- */
+    #header {
+      position: absolute;
+      top: 0; left: 0;
+      width: 100%;
+      padding: 18px 24px 26px;
+      pointer-events: none;
+      background: linear-gradient(180deg, rgba(0,0,16,0.85) 0%, rgba(0,0,16,0) 100%);
+      z-index: 10;
+    }
+    #header h1 {
+      margin: 0;
+      font-size: 1.55rem;
+      letter-spacing: 0.5px;
+      font-weight: 700;
+    }
+    #header h1 .copper { color: var(--copper); }
+    #header p {
+      margin: 4px 0 0;
+      font-size: 0.85rem;
+      opacity: 0.75;
+    }
+
+    /* ---------- Legend ---------- */
+    #legend {
+      position: absolute;
+      bottom: 18px;
+      left: 18px;
+      background: rgba(8, 12, 28, 0.78);
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 10px;
+      padding: 12px 14px;
+      font-size: 0.8rem;
+      backdrop-filter: blur(4px);
+      z-index: 10;
+      max-width: 230px;
+    }
+    #legend h2 {
+      margin: 0 0 8px;
+      font-size: 0.82rem;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      opacity: 0.8;
+    }
+    .legend-row {
+      display: flex;
+      align-items: center;
+      margin: 5px 0;
+    }
+    .swatch {
+      width: 16px; height: 16px;
+      border-radius: 3px;
+      margin-right: 9px;
+      border: 1.5px solid #ffffff;
+      flex: 0 0 auto;
+    }
+
+    /* ---------- Hover tooltip (globe.gl label) ---------- */
+    .wc-tooltip {
+      background: rgba(8, 12, 28, 0.94);
+      border: 1px solid rgba(205,127,50,0.6);
+      border-radius: 12px;
+      padding: 12px 14px;
+      width: 250px;
+      box-shadow: 0 8px 28px rgba(0,0,0,0.55);
+      color: #f4f4f4;
+      font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    }
+    .wc-tooltip .flag-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 8px;
+    }
+    .wc-tooltip img {
+      width: 46px;
+      height: auto;
+      border-radius: 3px;
+      box-shadow: 0 0 0 1px rgba(255,255,255,0.25);
+      display: block;
+    }
+    .wc-tooltip .name {
+      font-size: 1.02rem;
+      font-weight: 700;
+      line-height: 1.15;
+    }
+    .wc-tooltip .role {
+      font-size: 0.68rem;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      opacity: 0.85;
+      margin-top: 2px;
+    }
+    .wc-tooltip .role.host { color: #ffd479; }
+    .wc-tooltip .role.team { color: var(--copper); }
+    .wc-tooltip .fact {
+      font-size: 0.82rem;
+      line-height: 1.4;
+      opacity: 0.95;
+      border-top: 1px solid rgba(255,255,255,0.12);
+      padding-top: 8px;
+    }
+    .wc-tooltip .fact b { color: var(--copper); }
+
+    #loading {
+      position: absolute;
+      top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      font-size: 1rem;
+      opacity: 0.85;
+      z-index: 5;
+    }
+  </style>
+</head>
+<body>
+  <div id="globeViz"></div>
+
+  <div id="header">
+    <h1>FIFA <span class="copper">World&nbsp;Cup&nbsp;2026</span> — The Qualified World</h1>
+    <p>Hover a copper-coloured nation to see its flag and a fun fact · drag to spin · scroll to zoom</p>
+  </div>
+
+  <div id="legend">
+    <h2>Legend</h2>
+    <div class="legend-row"><span class="swatch" style="background:var(--usa-blue)"></span> USA — host</div>
+    <div class="legend-row"><span class="swatch" style="background:var(--can-red)"></span> Canada — host</div>
+    <div class="legend-row"><span class="swatch" style="background:var(--mex-red)"></span> Mexico — host</div>
+    <div class="legend-row"><span class="swatch" style="background:var(--copper)"></span> Qualified nation</div>
+    <div class="legend-row"><span class="swatch" style="background:var(--grey)"></span> Not in the tournament</div>
+  </div>
+
+  <div id="loading">Loading the globe…</div>
+
+  <script src="https://unpkg.com/globe.gl"></script>
+  <script>
+  // =============================================================
+  //  FIFA World Cup 2026 nations
+  //  Keyed by ISO 3166-1 alpha-2 code (matched against the
+  //  Natural Earth GeoJSON loaded below).
+  //  role: 'host-usa' | 'host-can' | 'host-mex' | 'team'
+  //  flag: optional override for the flagcdn image code
+  // =============================================================
+  const WC2026 = {
+    // ---- Host nations ----
+    US: { name: "United States", role: "host-usa",
+      fact: "The 1994 World Cup, hosted by the USA, still holds the record for the highest average attendance of any World Cup — nearly 69,000 fans per match." },
+    CA: { name: "Canada", role: "host-can",
+      fact: "Canada's only previous men's World Cup was 1986, where they failed to score a single goal — making a home tournament the perfect shot at redemption." },
+    MX: { name: "Mexico", role: "host-mex",
+      fact: "Mexico City's Estadio Azteca will become the first stadium ever to host matches at three different World Cups (1970, 1986 and 2026)." },
+
+    // ---- CONMEBOL (South America) ----
+    AR: { name: "Argentina", role: "team",
+      fact: "Argentina's 2022 triumph made Lionel Messi the first player ever to win the World Cup's Golden Ball at two different tournaments." },
+    BR: { name: "Brazil", role: "team",
+      fact: "Brazil is the only nation to have played in every single World Cup since the very first one in 1930." },
+    UY: { name: "Uruguay", role: "team",
+      fact: "Uruguay won the inaugural World Cup in 1930 and, with only ~3.4 million people, remains the smallest nation ever to be crowned champions." },
+    CO: { name: "Colombia", role: "team",
+      fact: "Colombian fans are famous for turning the stands into a carnival — salsa, vallenato and dancing follow the team everywhere it plays." },
+    EC: { name: "Ecuador", role: "team",
+      fact: "Ecuador is named after the Equator that crosses it, and plays home games in Quito at 2,800 m — high enough to leave visiting teams gasping for air." },
+    PY: { name: "Paraguay", role: "team",
+      fact: "Paraguay flies one of the very few national flags on Earth with a different emblem on its front and back sides." },
+
+    // ---- UEFA (Europe) ----
+    FR: { name: "France", role: "team",
+      fact: "France reached three of the last four World Cup finals (1998, 2006, 2018, 2022), winning the trophy in 1998 and 2018." },
+    GB: { name: "England", role: "team", flag: "gb-eng",
+      fact: "England's 1966 World Cup trophy was stolen before the tournament and famously found wrapped in newspaper under a hedge — by a dog named Pickles." },
+    ES: { name: "Spain", role: "team",
+      fact: "Spain won its only World Cup in 2010 despite losing its opening match — the first champion in history to start with a defeat." },
+    PT: { name: "Portugal", role: "team",
+      fact: "Cristiano Ronaldo is the only male player to have scored in five different World Cup tournaments." },
+    DE: { name: "Germany", role: "team",
+      fact: "Germany's 7–1 thrashing of hosts Brazil in the 2014 semi-final is one of the most stunning results in football history." },
+    NL: { name: "Netherlands", role: "team",
+      fact: "The Netherlands has reached three World Cup finals (1974, 1978, 2010) without ever lifting the trophy — the most finals without a title." },
+    BE: { name: "Belgium", role: "team",
+      fact: "Belgium has three official languages — Dutch, French and German — so its 'Red Devils' are cheered on in several tongues at once." },
+    HR: { name: "Croatia", role: "team",
+      fact: "Croatia, a nation of under four million, reached the 2018 final; its trademark red-and-white checkerboard kit comes from the national coat of arms." },
+    IT: { name: "Italy", role: "team",
+      fact: "Italy has won four World Cups, yet astonishingly failed to even qualify for both 2018 and 2022." },
+    CH: { name: "Switzerland", role: "team",
+      fact: "Switzerland flies one of only two square national flags in the world — the other belongs to Vatican City." },
+    AT: { name: "Austria", role: "team",
+      fact: "Austria's 'Wunderteam' of the early 1930s was one of football's first truly great national sides." },
+    DK: { name: "Denmark", role: "team",
+      fact: "Denmark won Euro 1992 as last-minute replacements, called up only after Yugoslavia was disqualified from the tournament." },
+    NO: { name: "Norway", role: "team",
+      fact: "Norway is the home of Erling Haaland, a striker whose goalscoring records have rewritten record books across Europe." },
+    PL: { name: "Poland", role: "team",
+      fact: "Poland's Robert Lewandowski once scored five goals in just nine minutes in a single Bundesliga match — a world record." },
+    RS: { name: "Serbia", role: "team",
+      fact: "Belgrade hosts the 'Eternal Derby' between Red Star and Partizan, regularly ranked among the fiercest rivalries in world football." },
+    TR: { name: "Türkiye", role: "team",
+      fact: "Türkiye is the only country that straddles two continents — Europe and Asia — divided by the Bosphorus strait in Istanbul." },
+
+    // ---- AFC (Asia) ----
+    JP: { name: "Japan", role: "team",
+      fact: "Japanese supporters are renowned worldwide for staying behind after matches to tidy up their section of the stadium." },
+    KR: { name: "South Korea", role: "team",
+      fact: "South Korea reached the World Cup semi-finals as co-hosts in 2002 — still the best-ever finish by an Asian nation." },
+    IR: { name: "Iran", role: "team",
+      fact: "Iran's domestic league regularly draws some of the largest crowds in Asia, with derbies in Tehran topping 90,000 fans." },
+    AU: { name: "Australia", role: "team",
+      fact: "Australia's Socceroos once won a World Cup qualifier 31–0 against American Samoa — the largest scoreline in international football history." },
+    SA: { name: "Saudi Arabia", role: "team",
+      fact: "Saudi Arabia stunned eventual champions Argentina 2–1 in the 2022 group stage, one of the greatest upsets the tournament has seen." },
+    QA: { name: "Qatar", role: "team",
+      fact: "Qatar hosted the 2022 World Cup — the first ever held in the Middle East and the first played in November and December." },
+    IQ: { name: "Iraq", role: "team",
+      fact: "Iraq won the 2007 Asian Cup against the odds, uniting the entire country in a rare moment of nationwide celebration." },
+    UZ: { name: "Uzbekistan", role: "team",
+      fact: "Uzbekistan is one of only two 'doubly landlocked' countries on Earth — you must cross at least two borders to reach any ocean." },
+
+    // ---- CAF (Africa) ----
+    MA: { name: "Morocco", role: "team",
+      fact: "Morocco became the first African and first Arab nation ever to reach a World Cup semi-final, in 2022." },
+    SN: { name: "Senegal", role: "team",
+      fact: "Senegal shocked defending champions France on their World Cup debut in 2002 and were crowned African champions in 2022." },
+    EG: { name: "Egypt", role: "team",
+      fact: "Cairo's Al Ahly is one of the most decorated football clubs in the history of the African game." },
+    NG: { name: "Nigeria", role: "team",
+      fact: "Nigeria's Super Eagles won Olympic football gold in 1996, beating both Brazil and Argentina on the way to the title." },
+    DZ: { name: "Algeria", role: "team",
+      fact: "Algeria beat mighty West Germany in 1982 in one of the most famous upsets in World Cup history." },
+    TN: { name: "Tunisia", role: "team",
+      fact: "Tunisia became the first African nation to win a World Cup match, defeating Mexico in 1978." },
+    CI: { name: "Côte d'Ivoire", role: "team",
+      fact: "Côte d'Ivoire is the world's largest producer of cocoa — the key ingredient in nearly all of the planet's chocolate." },
+    GH: { name: "Ghana", role: "team",
+      fact: "Ghana came within a single missed penalty of becoming the first African team to reach a World Cup semi-final, in 2010." },
+    CM: { name: "Cameroon", role: "team",
+      fact: "Cameroon's Roger Milla became the oldest goalscorer in World Cup history in 1994, netting at the age of 42." },
+
+    // ---- CONCACAF (rest of North/Central America & Caribbean) ----
+    PA: { name: "Panama", role: "team",
+      fact: "When Panama qualified for its first-ever World Cup in 2018, the government declared a national holiday to celebrate." },
+    CR: { name: "Costa Rica", role: "team",
+      fact: "Costa Rica topped a 2014 group containing Italy, England and Uruguay, then marched all the way to the quarter-finals." },
+    JM: { name: "Jamaica", role: "team",
+      fact: "Jamaica's 'Reggae Boyz' became the first English-speaking Caribbean nation to reach a World Cup, in 1998." },
+
+    // ---- OFC (Oceania) ----
+    NZ: { name: "New Zealand", role: "team",
+      fact: "New Zealand went unbeaten at the 2010 World Cup — three draws — yet still didn't advance past the group stage." },
+
+    // ---- Inter-confederation / debutants ----
+    CV: { name: "Cape Verde", role: "team",
+      fact: "Cape Verde is an archipelago of ten volcanic islands; with a population of around half a million, any World Cup berth is a genuine fairy tale." },
+    CW: { name: "Curaçao", role: "team",
+      fact: "Curaçao, home to roughly 150,000 people, is among the smallest territories ever to seriously chase a World Cup place." }
+  };
+
+  // ---- Colour palette ----
+  const COLORS = {
+    "host-usa": "#2a4d9c",
+    "host-can": "#d52b1e",
+    "host-mex": "#c8102e",
+    "team":     "#cd7f32",
+    "none":     "#7d7d7d"
+  };
+  const HOVER_COLORS = {
+    "host-usa": "#4f74cf",
+    "host-can": "#f24535",
+    "host-mex": "#ec2a4c",
+    "team":     "#e8a55a",
+    "none":     "#9a9a9a"
+  };
+
+  // Resolve a GeoJSON feature to one of our ISO keys (handles the
+  // Natural Earth quirk where ISO_A2 is "-99" for some countries).
+  function isoFor(props) {
+    const candidates = [props.ISO_A2_EH, props.ISO_A2, props.WB_A2, props.POSTAL];
+    for (const c of candidates) {
+      if (c && c !== "-99" && WC2026[c]) return c;
+    }
+    return null;
+  }
+
+  function entryFor(d) { return isoFor(d.properties); }
+
+  function flagCode(iso, info) {
+    return (info && info.flag) ? info.flag : iso.toLowerCase();
+  }
+
+  // ---- Build the globe ----
+  const world = Globe()(document.getElementById('globeViz'))
+    .backgroundColor('#000010')
+    .backgroundImageUrl('//unpkg.com/three-globe/example/img/night-sky.png')
+    .showGlobe(true)
+    .showAtmosphere(true)
+    .atmosphereColor('#3a6ea5')
+    .atmosphereAltitude(0.18);
+
+  // Dark "ocean" globe (no satellite texture, globle-style)
+  const mat = world.globeMaterial();
+  mat.color.set('#16263f');
+  if (mat.emissive) mat.emissive.set('#0b1729');
+  mat.emissiveIntensity = 0.35;
+  mat.shininess = 6;
+
+  let hoverD = null;
+
+  fetch('https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_50m_admin_0_countries.geojson')
+    .then(res => res.json())
+    .then(data => {
+      const features = data.features.filter(f => f.properties.ISO_A2_EH !== 'AQ'); // drop Antarctica
+
+      world
+        .polygonsData(features)
+        .polygonCapColor(d => {
+          const iso = entryFor(d);
+          const role = iso ? WC2026[iso].role : 'none';
+          return (d === hoverD) ? HOVER_COLORS[role] : COLORS[role];
+        })
+        .polygonSideColor(d => {
+          const iso = entryFor(d);
+          const role = iso ? WC2026[iso].role : 'none';
+          return iso ? COLORS[role] : 'rgba(120,120,120,0.6)';
+        })
+        .polygonStrokeColor(() => '#ffffff')
+        .polygonAltitude(d => {
+          if (d === hoverD) return 0.06;
+          return entryFor(d) ? 0.016 : 0.008;
+        })
+        .polygonLabel(d => {
+          const iso = entryFor(d);
+          if (!iso) return ''; // no tooltip for non-tournament nations
+          const info = WC2026[iso];
+          const isHost = info.role.startsWith('host');
+          const roleLabel = isHost ? 'Host Nation' : 'Qualified · World Cup 2026';
+          const roleClass = isHost ? 'host' : 'team';
+          const flag = flagCode(iso, info);
+          return `
+            <div class="wc-tooltip">
+              <div class="flag-row">
+                <img src="https://flagcdn.com/w160/${flag}.png" alt="${info.name} flag"
+                     onerror="this.style.display='none'">
+                <div>
+                  <div class="name">${info.name}</div>
+                  <div class="role ${roleClass}">${roleLabel}</div>
+                </div>
+              </div>
+              <div class="fact">${info.fact}</div>
+            </div>`;
+        })
+        .onPolygonHover(h => {
+          hoverD = h;
+          // trigger re-evaluation of colour / altitude accessors
+          world
+            .polygonCapColor(world.polygonCapColor())
+            .polygonAltitude(world.polygonAltitude());
+        })
+        .polygonsTransitionDuration(250);
+
+      // Initial camera + gentle auto-rotation
+      world.pointOfView({ lat: 25, lng: -70, altitude: 2.3 }, 0);
+      const controls = world.controls();
+      controls.autoRotate = true;
+      controls.autoRotateSpeed = 0.45;
+      controls.minDistance = 140;
+      controls.maxDistance = 600;
+
+      // Pause auto-rotation while the user interacts
+      controls.addEventListener('start', () => { controls.autoRotate = false; });
+
+      document.getElementById('loading').style.display = 'none';
+    })
+    .catch(err => {
+      console.error(err);
+      document.getElementById('loading').textContent =
+        'Could not load country data — please check your internet connection.';
+    });
+
+  // Keep the globe sized to the window
+  window.addEventListener('resize', () => {
+    world.width(window.innerWidth).height(window.innerHeight);
+  });
+  </script>
+</body>
+</html>
