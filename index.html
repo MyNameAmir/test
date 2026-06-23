@@ -303,7 +303,9 @@
     // subunit dataset splits it, so resolve England/Scotland by subunit code.
     if (props.SU_A3 === "ENG" && WC2026["GB-ENG"]) return "GB-ENG";
     if (props.SU_A3 === "SCT" && WC2026["GB-SCT"]) return "GB-SCT";
-    const candidates = [props.ISO_A2_EH, props.ISO_A2, props.WB_A2, props.POSTAL];
+    // NB: only real ISO/WB alpha-2 fields — NOT props.POSTAL, whose postal
+    // abbreviations collide with ISO codes (e.g. Eswatini's POSTAL is "ES").
+    const candidates = [props.ISO_A2_EH, props.ISO_A2, props.WB_A2];
     for (const c of candidates) {
       if (c && c !== "-99" && WC2026[c]) return c;
     }
